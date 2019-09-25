@@ -1,0 +1,607 @@
+\ Create a sound table from XB CALL SOUND() commands.
+\ First, do the following:
+\  1. Replace CALL SOUND() with SND[  ]SND
+\  2. Replace commas with spaces
+\  3. Surround all SND[ ... ]SND to be in sound table with
+\     SOUND_TABLE[  ]SOUND_TABLE
+
+HEX
+0 VARIABLE SDUR   \ sound duration
+0 VARIABLE SCNT   \ sound byte count
+0 VARIABLE SCADR  \ sound byte  count address in sound list
+0 VARIABLE TGEN   \ tone generator
+0 VARIABLE NGEN   \ noise generator flag
+
+: SOUND_TABLE[  ( -- addr )   HERE  ;  \ leave address of sound table
+: ]SOUND_TABLE  ( -- )  
+   4 C, 09F C, 0BF C, 0DF C, 0FF C, 00 C, \ mute all generators
+   00 C,          \ add a final 0 count byte
+   ALIGN  ;       \ insure HERE is on a word boundary
+: FCONST  ( -- d )   \ frequency constant = ~111860.8
+   B4F5 1  ;         \ rounded to 111861
+: >FCODE  ( 0abc -- 00ab 000c ) \ massage fcode for byte output
+   DUP 4 SRL SWAP    \ S:00ab 0abc
+   0F AND  ;         \ S:00ab 000c
+: HZ>CODE  ( freq -- sb2 sb1 )  \ convert freq to sound tone & data bytes
+   FCONST ROT U/ SWAP DROP    \ calculate fcode
+   03FF AND 2 MAX             \ insure only 10-bit number > 1
+   >FCODE 080 OR  ;           \ convert to a tone byte as sb1
+
+: GETPARAM  ( -- flag )  ( IS:<num> )  \ get next parameter in sound list
+   BL WORD        \ get next parameter to HERE as packed string
+   HERE 1+ C@     \ get first char
+   ASCII ] = IF   \ is it ']'?
+      0           \ yes..assume we read ']SND'
+   ELSE
+      1           \ no..let parameter be processed
+   THEN  ;
+\ Process parameter at HERE as duration
+: DURATION  ( -- )
+   HERE NUMBER DROP    \ 16-bit duration to stack
+   ABS            \ make positive
+   6 64 */        \ convert to 1/60s of a second
+   0FF MIN        \ insure < 256
+   1 MAX          \ at least 1
+   SDUR !  ;      \ store it
+\ Process paramter at HERE as frequency or noise
+: FREQUENCY  ( -- [freq|noise] flag )
+   HERE NUMBER    \ get 32-bit number to stack
+   0< IF          \ first cell neg, i.e., noise?
+      0           \ false flag for noise
+   ELSE
+      1           \ true flag for tone
+   THEN  ;
+\ Process parameter at HERE as volume
+: VOLUME  ( -- sb )
+   HERE NUMBER DROP    \ 16-bit volume to stack
+   1 SRL          \ change Basic's 0-30 to 0-15
+   0F AND         \ force one nybble
+   090 OR         \ make sb a latch/volume byte
+;
+: NOISE  ( -n -- sb )  \ convert negative number on stack to noise code
+   ABS 1- 7 AND      \ adjust -n to noise code bits
+   0E0 OR  ;         \ convert to a latch/noise byte as sb
+
+: ]SND   ( -- )
+   SCNT @ SCADR @ C!    \ stash sound byte count
+   SDUR @ C,  ;         \ compile sound duration
+
+: SND[   ( -- )
+   0 TGEN !       \ zero sound generator number
+   0 SCNT !       \ initialize byte count of sound list
+   HERE SCADR !   \ store address of sound byte count for current sound list
+   0 C,           \ compile 0 to hold place
+   GETPARAM DROP  \ get parameter and assume it is the duration number
+   DURATION       \ process duration
+   BEGIN
+      GETPARAM    \ get next frequency/noise
+   WHILE          \ did we read ]SND?
+      FREQUENCY   \ no..process parameter
+      IF          \ frequency?
+         HZ>CODE     \ convert to 2 sound bytes
+         TGEN @ OR   \ set tone generator
+         2 SCNT +!   \ increment sound byte count by 2
+         C, C,       \ compile tone bytes
+         0 NGEN !    \ reset noise gen flag for volume byte
+      ELSE
+         NOISE
+         1 SCNT +!   \ increment sound byte count by 1
+         C,          \ compile noise byte
+         1 NGEN !    \ set noise gen flag for volume byte
+      THEN
+      GETPARAM DROP  \ get parameter and assume it is the volume number
+      VOLUME         \ process volume
+      NGEN @ IF      \ noise volume?
+         60 OR       \ yes..OR generator 3 with sb
+      ELSE
+         TGEN @ OR   \ no..or current tone generator with sb
+         20 TGEN +!  \ increment to next tone generator
+      THEN
+      1 SCNT +!      \ increment sound byte count by 1
+      C,             \ compile volume sound byte
+   REPEAT            \ do it again
+   ]SND  ;           \ clean up
+
+DECIMAL 
+\ Explosion sound from TidBit
+\ CALL SOUND(50,788,0,3496,0,1243,0)
+\ CALL SOUND(50,788,8,3496,30,1243,8)
+\ CALL SOUND(50,788,16,3496,16,1243,20)
+\ CALL SOUND(50,788,24,3496,30,1243,12)
+\ CALL SOUND(66,788,20,3496,24,1243,24)
+\ CALL SOUND(66,788,28,3496,30,1243,28)
+\ CALL SOUND(66,3107,0,5593,0,1670,0)
+\ CALL SOUND(66,3107,8,5593,30,1670,8)
+\ CALL SOUND(66,3107,16,5593,16,1670,16)
+\ CALL SOUND(66,3107,24,5593,30,1670,20)
+\ CALL SOUND(66,3107,20,5593,24,1670,24)
+\ CALL SOUND(66,3107,28,5593,30,1670,28)
+
+\ Sound table production code for above XB CALL SOUND() statements
+SOUND_TABLE[  
+   SND[ 50  788  0 3496  0 1243  0 ]SND
+   SND[ 50  788  8 3496 30 1243  8 ]SND
+   SND[ 50  788 16 3496 16 1243 20 ]SND
+   SND[ 50  788 24 3496 30 1243 12 ]SND
+   SND[ 66  788 20 3496 24 1243 24 ]SND
+   SND[ 66  788 28 3496 30 1243 28 ]SND
+   SND[ 66 3107  0 5593  0 1670  0 ]SND
+   SND[ 66 3107  8 5593 30 1670  8 ]SND
+   SND[ 66 3107 16 5593 16 1670 16 ]SND
+   SND[ 66 3107 24 5593 30 1670 20 ]SND
+   SND[ 66 3107 20 5593 24 1670 24 ]SND
+   SND[ 66 3107 28 5593 30 1670 28 ]SND
+]SOUND_TABLE
+
+HEX
+: CHARGESND  ( -- addr )
+DATA[
+   098D 0890 AF01 B0C9 05D0 0303 94BF D403 0398 B8DA 0303 9CBF 
+   D603 039A BCDC 0303 9EBF DE03 0984 0290 A401 B0C2 04D0 0303 
+   94BF D403 0398 B8D8 0303 9CBF DA03 039A BCDC 0303 9EBF DE03 
+   049F BFDF FF00 0000
+]DATA  DROP  ;
+
+: CHARGE   ( -- )   \ preemptively play charging sound
+   CHARGESND 1 PLAY  ;
+DECIMAL
+
+\ bomb_hit_sound from TidBit
+\ CALL SOUND(100,-7,0)::
+\ CALL SOUND(100,-7,8)::
+\ CALL SOUND(100,-7,16)::
+\ CALL SOUND(100,-7,24)::
+\ CALL SOUND(100,-7,28)
+
+\ Sound table production code for above XB CALL SOUND() statements
+SOUND_TABLE[  
+   SND[ 100 -7  0 ]SND
+   SND[ 100 -7  8 ]SND
+   SND[ 100 -7 16 ]SND
+   SND[ 100 -7 24 ]SND
+   SND[ 100 -7 28 ]SND
+]SOUND_TABLE
+
+HEX
+: BOMBSND  ( -- addr )
+DATA[
+   02E6 F006 02E6 F406 02E6 F806 02E6 
+   FC06 02E6 FE06 049F BFDF FF00 0000
+]DATA  DROP  ;
+
+: BOMB   ( -- )   \ preemptively play bomb sound
+   BOMBSND 1 PLAY  ;
+DECIMAL
+
+\ get_key_again sound from TidBit
+\ CALL SOUND(20,220,30,220,30,741,30,-4,0)
+
+\ Sound table production code for above XB CALL SOUND() statement
+SOUND_TABLE[  
+   SND[ 20 220 30 220 30 741 30 -4 0 ]SND
+]SOUND_TABLE
+
+HEX
+: KEYAGAINSND  ( -- addr )
+DATA[
+   0B8C 1F9F AC1F BFC6 09DF E3F0 0104 9FBF DFFF 0000
+]DATA  DROP  ;
+
+: KEYAGAIN   ( -- )   \ preemptively play key_again sound
+   KEYAGAINSND 1 PLAY  ;
+DECIMAL
+
+\ no-gallop sound from TidBit
+\ CALL SOUND(125,220,30,220,30,1962,30,-8,18)
+\ CALL SOUND(125,220,30,220,30,2330,30,-8,16)
+\ CALL SOUND(125,220,30,220,30,4661,30,-8,14)
+
+\ Sound table production code for above XB CALL SOUND() statement
+SOUND_TABLE[  
+   SND[ 125 220 30 220 30 1962 30 -8 18 ]SND
+   SND[ 125 220 30 220 30 2330 30 -8 16 ]SND
+   SND[ 125 220 30 220 30 4661 30 -8 14 ]SND
+]SOUND_TABLE
+
+HEX
+: NOGALLOPSND  ( -- addr )
+DATA[
+   079F BFC9 03DF E7F9 0705 C003 DFE7 
+   F807 05C7 01DF E7F7 0702 DFFF 0000
+]DATA  DROP  ;
+
+: NOGALLOP   ( -- )   \ preemptively play no-gallop sound
+   NOGALLOPSND 1 PLAY  ;
+DECIMAL
+
+\ gallop sound from TidBit
+\ CALL SOUND(50,-7,0)
+\ CALL SOUND(50,-7,15)
+\ CALL SOUND(50,-7,0)
+\ CALL SOUND(50,-7,15)
+\ CALL SOUND(66,-7,0)
+\ CALL SOUND(166,-7,15)
+\ Sound table production code for above XB CALL SOUND() statement
+SOUND_TABLE[  
+   SND[  50 -7  0 ]SND
+   SND[  50 -7 15 ]SND
+   SND[  50 -7  0 ]SND
+   SND[  50 -7 15 ]SND
+   SND[  66 -7  0 ]SND
+   SND[ 166 -7 15 ]SND
+]SOUND_TABLE
+
+HEX
+: GALLOPSND  ( -- addr )
+DATA[
+   02E6 F003 02E6 F703 02E6 F003 02E6 F703 
+   02E6 F003 02E6 F709 049F BFDF FF00 0000
+]DATA  DROP  ;
+
+: GALLOP   ( -- )   \ non-preemptively play gallop sound
+   3 0 DO
+      GALLOPSND 0 PLAY
+   LOOP  ;
+
+   
+\ All the above sounds are grouped together here
+HEX
+: CHARGESND  ( -- addr )
+   DATA[
+      098D 0890 AF01 B0C9 05D0 0303 94BF D403 0398 B8DA 0303 
+      9CBF D603 039A BCDC 0303 9EBF DE03 0984 0290 A401 B0C2 
+      04D0 0303 94BF D403 0398 B8D8 0303 9CBF DA03 039A BCDC 
+      0303 9EBF DE03 049F BFDF FF00 0000
+   ]DATA  DROP  ;
+: CHARGE   ( -- )   \ preemptively play charging sound
+   CHARGESND 1 PLAY  ;
+
+: BOMBSND  ( -- addr )
+   DATA[
+      02E6 F006 02E6 F406 02E6 F806 02E6 
+      FC06 02E6 FE06 049F BFDF FF00 0000
+   ]DATA  DROP  ;
+: BOMB   ( -- )   \ preemptively play bomb sound
+   BOMBSND 1 PLAY  ;
+
+: KEY2SND  ( -- addr )
+   DATA[
+      0B8C 1F9F AC1F BFC6 09DF E3F0 0104 9FBF DFFF 0000
+   ]DATA  DROP  ;
+: KEY2   ( -- )   \ preemptively play key2 sound
+   KEY2SND 1 PLAY  ;
+
+: NOGALLOPSND  ( -- addr )
+   DATA[
+      079F BFC9 03DF E7F9 0705 C003 DFE7 
+      F807 05C7 01DF E7F7 0702 DFFF 0000
+   ]DATA  DROP  ;
+: NOGALLOP   ( -- )   \ preemptively play no-gallop sound
+   NOGALLOPSND 1 PLAY  ;
+
+: GALLOPSND  ( -- addr )
+   DATA[
+      02E6 F003 02E6 F703 02E6 F003 02E6 F703 
+      02E6 F003 02E6 F709 049F BFDF FF00 0000
+   ]DATA  DROP  ;
+: GALLOP   ( -- )   \ non-preemptively play gallop sound
+   3 0 DO
+      GALLOPSND 0 PLAY
+   LOOP  ;
+DECIMAL
+
+
+\ Stratego initialization
+HEX  GRAPHICS  0 0 0 0 07F CHAR  RANDOMIZE  CLS
+HERE  \ save place
+
+\ color table
+DATA[ 0000 0010 C343 4381 B1B1 B143 1717 1771 B1B1 1010 ]DATA
+2 * COLTAB SWAP      \ [S:addr vaddr cnt*2]
+VMBW                 \ write color table
+0C SCREEN            \ screen color
+0A BLOCK 040 +  PDT 0F0 +  0390 VMBW \ write PDT from block #10
+
+\ define characters on block #10, 912 chars at pos 64
+\ DATA[ 007C 7C7C 7C7C 7C7C 0000 0000 0000 0000 0000 0000 0000 
+\       0000 0010 1010 1010 0010 0248 0114 0148 2004 800A 4000 
+\       2C99 0022 0862 3401 4806 5200 2D80 193C 7C3E 1841 0020 
+\       5050 2054 4834 0008 0810 0000 0000 0F1F 7FFF FF7F 7F3F 
+\       7F7F 3F3F 1F0F 0F03 00E1 F3FF FFFF FFFF FFFF FFFF FFFF 
+\       3C08 33FF FFFF FFFF FFFF FFFF FFE7 C3C3 4100 81E3 FFFF 
+\       FFFF FFFF FFFF FFFF FFFF EFC3 C3F7 FFFF FFFF FFFF FFFF 
+\       FFFF FFFF DF84 F8FC FEFF FFFF FEFE FFFE FEFC FCFC F8F8 
+\       0000 0000 FF00 FFFF D0D0 D0D0 D0D0 D0D0 0B0B 0B0B 0B0B 
+\       0B0B FFFF FFFF FFFF FFFF 0081 DBFF C7D9 C5D9 6EAD DBE7 
+\       E7DB BD7E 0040 6D5F 5153 555E 0002 B6FA AADA AA7A 5F5F 
+\       5F5F 5F5F 7F00 FAFA FAFA FAFA FE00 0020 1008 0408 1020 
+\       0038 4404 0810 0010 0038 445C 545C 4038 001C 0C14 74BC 
+\       64F6 007C A626 3C26 267C 003A 66C2 C0C0 623C 007C A626 
+\       7626 267C 00FE 6660 7860 E6FE 00FE 6260 7860 60F8 003A 
+\       66C0 CEC2 663C 00EE 6464 FC64 64EE 003C 1818 1818 183C 
+\       001E 0C0C 0C4C 4C38 00E6 6468 7868 64E6 0078 3078 3032 
+\       367E 00C6 446C 5454 44EE 00C6 6474 544C 44C6 0038 6CC6 
+\       D6C6 6C38 007C 2676 267C 2070 0038 6CC6 C6DE 6639 007C 
+\       2676 263C 2476 003A 6662 3CC6 E6BC 00FE DA9A 1818 183C 
+\       00EE 6464 6464 7C38 00DE 4C48 2828 3830 00C6 C654 546C 
+\       6C44 00EE 4438 1028 44EE 00F7 6234 1818 183C 007E 4614 
+\       2E18 327E 001E 1818 1818 181E 0000 4020 1008 0400 003C 
+\       0C0C 0C0C 0C3C 0000 0000 0F08 0B0B 0000 0000 F010 D0D0 
+\       000C 1238 747C 3800 0078 4E7A 4E42 4000 0000 3834 3CBD 
+\       7E00 0A05 0618 3C5E FF00 0204 0C1E 2E7E FF00 0808 1C3D 
+\       3E5E 7E00 020C 3C74 EC5C 7E00 020C 1E3A 366E 7F00 0018 
+\       3C66 DBFF 7E00 0C3E EE76 3A3E 1C00 040C 3E67 79FF 1E00 
+\       041C 3E73 CFF8 C000 0099 FF91 D5D5 D5D1 0099 FFC3 FBC3 
+\       DFC3 0099 FFC3 FBF3 FBC3 0099 FFF3 EBDB C3FB 0099 FFC3 
+\       DFC3 FBC3 0099 FFC3 DFC3 DBC3 0099 FFC3 FBF7 EFDF 0099 
+\       FFC3 DBC3 DBC3 0099 FFC3 DBC3 FBFB 0099 FFC7 DBC3 DBC7 
+\       0099 FFC3 DFC7 DFDF 0099 FFE3 DFE3 FBC7 0040 6D5F 5F5F 
+\       5F5F 0002 B6FA FAFA FAFA 5F5F 5F5F 5F5F 7F00 FAFA FAFA 
+\       FAFA FE00 0010 1010 0010 1010 0030 0808 0408 0830 0000 
+\       2054 0800 0000 0000 0000 0000 0000 3864 C6C6 C64C 3800 
+\       1878 1818 181A 7C00 3C66 660C 103A 6600 3C66 061C 066E 
+\       3C00 3830 6C4C FE0C 1E00 667C 607C 0666 3C00 3C66 C0DC 
+\       E646 3C00 C6FE 8C0C 1818 1800 78C4 E478 9C8C 7800 78CC 
+\       CC74 04C8 7000 F080 8080 0000 0000 0F01 0101 0000 0000 
+\       0000 0000 8080 80F0 0000 0000 0101 010F 0000 0000 0000 
+\       0000 0000 0000 0000 0000 ]DATA
+
+\ draw initial screen starting with the initial field
+0 0 0280 22 HCHAR  0 0 14 20 VCHAR  01F 0 14 20 VCHAR
+   \ draw random patches
+\ draw lakes
+7 08 GOTOXY ." (*,.02"   7 09 GOTOXY ." )77773"
+7 0A GOTOXY ." (77772"   7 0B GOTOXY ." )+-/13"
+013 08 GOTOXY ." (*,.02"   013 09 GOTOXY ." )77773"
+013 0A GOTOXY ." (77772"   013 0B GOTOXY ." )+-/13"
+\ draw them another way
+: LAKEGFX S" (*,.02)77773(77772)+-/13" ;
+: LAKES 0114 0107 DO LAKEGFX 1+ 041 0 DO DUP J I + 6 VMBW 6 +
+   020 +LOOP DROP 0C +LOOP  ;
+DP !  \ restore dictionary
+DECIMAL 4 22 GOTOXY KEY DROP TEXT80
+
+\ Stratego initialization 2
+HEX  GRAPHICS  0 0 0 0 07F CHAR  RANDOMIZE  CLS
+HERE  \ save place
+
+\ color table
+DATA[ 0000 0010 C343 4381 B1B1 B143 1717 1771 B1B1 1010 ]DATA
+2 * COLTAB SWAP      \ [S:addr vaddr cnt*2]
+VMBW                 \ write color table
+0C SCREEN            \ screen color
+0A BLOCK 040 +  PDT 0F0 +  0390 VMBW   \ PDT (block#10)
+0B BLOCK 040 +  SCRN_START @ 0300 VMBW \ screen (block#11)
+   \ draw random patches
+DP !  \ restore dictionary
+DECIMAL 4 22 GOTOXY KEY DROP TEXT80
+
+\ Random feature placement
+\ ...Maybe should run loop 200 or 300 times(?)
+DECIMAL
+: PLAIN  ( -- )  \ randomly place landscape features on plain
+   100 0 DO          \ possibly 100 features
+      10 RND         \ generate test number
+      DUP 2 < IF     \ test #1
+         DROP 35
+      ELSE
+         DUP 7 > IF  \ test #2
+            DROP 36
+         ELSE 
+            4 = IF   \ test #3
+               37
+            ELSE     \ no feature this go-round
+               0
+            THEN
+         THEN
+      THEN
+      -DUP IF        \ generate display position
+         30 RND 1+
+         20 RND
+         ROT 1 SWAP
+         HCHAR       \ display char
+      THEN  
+   LOOP ;
+
+\ or
+
+: PLAIN  ( -- )  \ randomly place landscape features on plain
+   100 0 DO          \ possibly 100 features
+      10 RND         \ generate test number
+      CASE
+         0 OF 35 ENDOF
+         1 OF 35 ENDOF
+         8 OF 36 ENDOF
+         9 OF 36 ENDOF
+         4 OF 37 ENDOF
+         ELSEOF 0 ENDOF
+      ENDCASE
+      -DUP IF        \ generate display position
+         30 RND 1+
+         20 RND
+         ROT 1 SWAP
+         HCHAR       \ display char
+      THEN  
+   LOOP ;
+
+\ XB code for above
+\   FOR I=1 TO 100
+\      X=INT(RND*30)+2
+\      Y=INT(RND*20)+1
+\      N=INT(RND*10)+1
+\      IF N<=2 THEN CALL HCHAR(Y,X,35) ..
+\         ELSE IF N>8 THEN CALL HCHAR(Y,X,36)
+\      IF N=5 THEN CALL HCHAR(Y,X,37)  
+\   NEXT I
+
+HEX
+\ block-friendly PLAIN
+: PLAIN  ( -- )  \ randomly place landscape features on plain
+   064 0 DO 0A RND DUP 2 < IF DROP 023 ELSE DUP 7 > IF DROP 024
+   ELSE 4 = IF 025 ELSE 0 THEN THEN THEN -DUP IF 01E RND 1+
+   014 RND ROT 1 SWAP HCHAR THEN LOOP  ;
+
+\ or
+
+: PLAIN  ( -- )  \ randomly place landscape features on plain
+   064 0 DO 0A RND CASE 0 OF 023 ENDOF 1 OF 023 ENDOF 8 OF 024
+   ENDOF 9 OF 024 ENDOF 4 OF 025 ENDOF ELSEOF 0 ENDOF ENDCASE
+   -DUP IF 01E RND 1+ 014 RND ROT 1 SWAP HCHAR THEN LOOP ;
+
+\ Vectored CASE for fbForth with runtime error checking
+: CASE:  ( -- 99 ) ( IS:<name> )  \ defines choice words
+   99             \ for error checking by | and ;CASE
+   <BUILDS     \ ...compile-time action for CASE:-defined word
+      0 ,         \ reserve space for choice count and initialize to 0
+   DOES>    ( n -- ) \ ...runtime action for CASE:-defined word
+      2DUP        \ dup n pfa..........stack:n pfa n pfa
+      @           \ get choice count...stack:n pfa n cnt
+      OVER <      \ cnt < n?...........stack:n pfa n f1
+      OVER 1 <    \ n < 1?.............stack:n pfa n f1 f2
+      OR ABORT" range!" \ abort if either flag true..stack:n pfa n
+      + +         \ pfa + n + n = addr of cfa of choice(n)
+      @           \ get cfa(n)
+      EXECUTE     \ execute cfa(n)
+;
+\ Compile CFA of next choice <name> into just-defined CASE: word
+: |   ( n -- 99 ) ( IS:<name> ) 
+   99 ?PAIRS      \ check that latest word was defined by CASE:..else error
+   99                   \ restore error-checking # for next | or ;CASE
+   1 LATEST PFA +!      \ increment choice count of word defined by CASE:
+   [COMPILE] ' CFA ,    \ compile CFA of <name> as this choice
+;
+
+: ;CASE  ( n -- )  99 ?PAIRS ;  \ check for 99 from CASE:..else error
+
+\ example code:
+ : FOO   ." FOO" ;
+ : BAR   ." BAR" ;
+ : FIZZ  ." FIZZ" ;
+ : BUZZ  ." BUZZ" ;
+
+CASE: CHOICE  ( n -- ) | FOO  | BAR | FIZZ | BUZZ | NOP ;CASE
+
+
+\ ====================================================================
+\ PIECE array creation for Stratego in fbForth
+\ From Wikipedia
+\ RANK    NAME    COUNT  FEATURE
+\ ---------------------------------------------
+\  B or B   Bomb        6  Immovable; defeats any attacking piece except Miner
+\ 10 or 1   Marshal     1  Can be captured by the Spy
+\  9 or 2   General     1
+\  8 or 3   Colonel     2
+\  7 or 4   Major       3
+\  6 or 5   Captain     4
+\  5 or 6   Lieutenant  4
+\  4 or 7   Sergeant    4
+\  3 or 8   Miner       5  Can defuse bombs
+\  2 or 9   Scout       8  Can move any distance in a straight line, without leaping over pieces/lakes
+\  1 or S   Spy         1  Can defeat the Marshal, but only if the Spy makes the attack
+\  F or F   Flag        1
+
+\ Strategy: create a meta language to manage the data structures for game pieces
+\ Hierarchy:
+\     SHAPE is made of 6 chars
+\     PIECE is made of a SHAPE
+\     Each piece has a unique ID (?)
+\     Pieces exist on the 10x10 board as their ID
+\     Piece IDs exist in two teams COMPUTER and HUMAN
+\     A team is an array of 40 pieces
+
+\ a few helpers
+: CREATE: ( -- ) ( IS:<name> )  0 VARIABLE -2 ALLOT ;  \ works like ANS Create
+: BOUNDS ( n1 n2 -- hi lo )   OVER + SWAP ;  \ handy for indexing through arrays in DO LOOPS
+: CELLS ( n -- 2n )  1 SLA ;
+: ]L ( n -- ) ] [COMPILE] LITERAL ;  IMMEDIATE
+: 2! ( n1 n2 adr -- )   SWAP OVER ! 2+ ! ;
+: 2@ ( adr -- n1 n2 )   DUP 2+ @ SWAP @ ;
+\ ============================================
+\ creates a byte counted string from stack data of 6 chars
+\ Usage:  1 2 3 4 5 6 SHAPE: BOMB
+
+: BYTES, ( n -- ) DUP C,  0 DO  C,  LOOP ;
+: SHAPE: ( n1 n2 n3 n4 n5 n6 -- ) ( IS:<name> )  CREATE:   6 BYTES, ;
+
+10 20 30 40 50 60 SHAPE: ABomb
+10 20 30 40 50 60 SHAPE: AMarshal
+10 20 30 40 50 60 SHAPE: AGeneral
+10 20 30 40 50 60 SHAPE: AColonel
+10 20 30 40 50 60 SHAPE: AMajor
+10 20 30 40 50 60 SHAPE: ACaptain
+10 20 30 40 50 60 SHAPE: ALieutenant
+10 20 30 40 50 60 SHAPE: ASergeant
+10 20 30 40 50 60 SHAPE: AMiner
+10 20 30 40 50 60 SHAPE: AScout
+10 20 30 40 50 60 SHAPE: ASpy
+10 20 30 40 50 60 SHAPE: AFlag
+
+\ ==========================================
+\ PIECE CREATOR
+: CELLS, ( n -- ) DUP ,  0 DO , LOOP ;
+
+: PIECE:   CREATE:   7 CELLS,  ;
+
+\ access to piece fields
+DECIMAL
+( assumes read only fields after definition)
+: XY]      ( piece -- x y) [ 6 CELLS ]L + 2@ ;
+: XY]!     ( x y piece -- ) [ 6 CELLS ]L + 2! ;
+: RANK1]   ( piece -- n)  [ 5 CELLS ]L +  @ ;
+: RANK2]   ( piece -- n)  [ 4 CELLS ]L + @ ;
+: MOTION]  ( piece -- n)  [ 3 CELLS ]L + @ ;
+: SPECIAL] ( piece -- n)  [ 2 CELLS ]L + @ ;
+: SHAPE]   ( piece -- shape)  [ 1 CELLS ]L + @ ;  \ return SHAPE data structure addr
+\ Not sure we can guarantee unique ID this way!
+\ The 2nd and 5th chars are unique for human.
+\ The displayed shapes for computer pieces are all identical!
+\ : ID]   ( piece -- c)   @  C@ ; \ get the first char of the shape as the ID
+: ID]   ( piece -- c)  SHAPE] 1+ C@ ; \ get the first char of the shape as the ID ????
+
+\ : SIZE]    ( [piece] -- n ) DROP [ 7 CELLS ]L  ;
+: SIZE]    ( piece -- n ) @  ;
+
+\ operations on a "PIECE:"
+: .PARTS  ( piece -- c c c c c c) COUNT BOUNDS DO I C@ LOOP ;
+: .DRAW ;
+: .ERASE ( -- ) ;
+: .POSITION ( -- ) ;
+: .MOVE ( x y x' y' -- ) ;
+
+( X Y  rank1 rank2 motion special shape              Name )
+( ---  ----- ----- ------ ------- -----              ----- )
+HEX
+  0 0  AAAA  BBBB  CCCC   DDDD    ABomb       PIECE: [Bomb
+  0 0  AAAA  BBBB  CCCC   DDDD    AMarshal    PIECE: [Marshal
+  0 0  AAAA  BBBB  CCCC   DDDD    AGeneral    PIECE: [General
+  0 0  AAAA  BBBB  CCCC   DDDD    AColonel    PIECE: [Colonel
+  0 0  AAAA  BBBB  CCCC   DDDD    AMajor      PIECE: [Major
+  0 0  AAAA  BBBB  CCCC   DDDD    ACaptain    PIECE: [Captain
+  0 0  AAAA  BBBB  CCCC   DDDD    ALieutenant PIECE: [Lieutenant
+  0 0  AAAA  BBBB  CCCC   DDDD    ASergeant   PIECE: [Sergeant
+  0 0  AAAA  BBBB  CCCC   DDDD    AMiner      PIECE: [Miner
+  0 0  AAAA  BBBB  CCCC   DDDD    AScout      PIECE: [Scout
+  0 0  AAAA  BBBB  CCCC   DDDD    ASpy        PIECE: [Spy
+  0 0  AAAA  BBBB  CCCC   DDDD    AFlag       PIECE: [Flag
+
+
+HEX 300 CONSTANT LASTPOS
+
+: MATRIX:  ( x y --)
+           <BUILDS ( ... )   \ stuff to record x y, allocate memory
+
+            DOES> ( x y -- vdpaddr)
+            \ return proper VDP addresses for 2x6 "SHAPEs"
+             ;
+
+
+10 10 MATRIX: BOARD
+
+: BOARD@   ( x y -- vdpaddr) BOARD @ ; 
+: BOARD-PIECE ( x y -- c ) BOARD@ VSBR ; 
+
+\ usage:   [BOMB SHAPE] .DRAW
+\          10 10 [Miner SHAPE] .MOVE
+\          10 10 [Spy XY]!
+
+\          5 0 BOARD-PIECE [MINER ID] = IF ... \  test the piece at board 5,0

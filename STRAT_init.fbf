@@ -1,0 +1,91 @@
+\ ===Code BELOW is on blocks 2 and 3 of STRATEGO===vvvvv=======
+ 
+\ Block #2
+\ Quick & dirty display of Stratego splash & opening screen
+BASE->R  HEX        \ Splash screen is from 12 blocks (13..24)
+: WAIT ( -- ) BEGIN PAUSE UNTIL ;  \ wait for <break>
+: SPLASH ( vaddr blk -- )   \ copy 6 KiB bytes from 6 blocks
+   DUP 6 + SWAP DO   \ copy 6 blocks to VRAM
+      DUP            \ save current vaddr location
+      I BLOCK SWAP 0400 VMBW  \ copy 1 KiB from next block to VRAM
+      0400 +         \ next 1 KiB
+   LOOP     \ next block
+   DROP ;   \ clean up
+: PLAIN  ( -- )  \ randomly place landscape features on plain
+   012C 0 DO   \ loop 300 times
+      0A RND   \ 0-9 to decide among char 23-25
+      CASE     \ get char to stack
+         0 OF 023 ENDOF 
+         1 OF 023 ENDOF 
+         8 OF 024 ENDOF 
+         9 OF 024 ENDOF 
+         4 OF 025 ENDOF 
+         ELSEOF 0 ENDOF 
+      ENDCASE
+      -DUP IF  \ if we have a char, place it
+         01E RND 1+  \ generate column
+         014 RND     \ generate row
+         ROT         \ char to TOS
+         1 SWAP      \ 1 char to copy..char to TOS
+         HCHAR       \ place char
+      THEN 
+   LOOP ;
+: LAKEGFX   ( -- )   \ char string for a lake
+   S" (*,.02)77773(77772)+-/13" ;
+: LAKES  ( -- )   \ place 2 lakes
+   0114 0107 DO      \ 2 identical lakes..start screen pos=263
+      LAKEGFX 1+     \ address of 1st char in string
+      061 0 DO       \ 4 rows
+         DUP         \ save string address for next go-round
+         J I +       \ calculate next screen pos
+         6 VMBW 6 +  \ copy 6 chars from string
+      020 +LOOP      \ next row
+      DROP           \ drop leftover string address
+   0C +LOOP  ;       \ next lake
+R->BASE
+CR ." Tap <break> to continue here & after each screen..." CR
+WAIT   
+BASE->R      
+VDPMDE @       \ save current graphics mode to stack
+HEX GRAPHICS2  \ bitmap graphics for splash screen
+83D4 C@ DUP    \ save current VR01 to TOS
+40 - DUP 1 VWTR 83D4 C!    \ blank screen
+COLTAB 0D SPLASH     \ 6 KiB to color table
+PDT 013 SPLASH       \ 6 KiB to pattern descriptor table
+DUP 83D4 C! 1 VWTR   \ restore VR01
+WAIT
+R->BASE  -->
+
+\ Block #3
+\ Stratego initialization
+BASE->R     HEX  GRAPHICS     \ regular graphics mode
+0 0 0 0 07F CHAR     \ define char 127
+RANDOMIZE  CLS       \ set random number seed..clear screen
+83D4 C@ DUP          \ save current VR01 to TOS
+40 - DUP 1 VWTR 83D4 C!   \ blank screen
+\ color table
+DATA[ 0000 0010 C343 4381 B1B1 B143 1717 1771 B1B1 1010 ]DATA
+2 * COLTAB SWAP      \ [S:addr vaddr cnt*2]
+VMBW                 \ write color table
+0C SCREEN            \ screen color
+\ PDT
+0A BLOCK 040 +       \ source starts at byte #64 of block #10
+PDT 0F0 +            \ destination starts at PDT ASCII 30
+0390 VMBW            \ copy 912 bytes
+\ screen chars
+0B BLOCK 040 +       \ source starts at byte #64 of block #11
+SCRN_START @         \ destination is start of screen VRAM
+0300 VMBW            \ copy 768 bytes
+
+PLAIN                \ randomly place plain features
+LAKES                \ place lakes)
+DUP 83D4 C! 1 VWTR   \ restore screen
+\ will not do this for actual game play
+WAIT  FORGET WAIT    \ restore dictionary
+
+VMODE                \ restore screen mode
+R->BASE  
+ 
+\ ===Code ABOVE is on blocks 2 and 3 of STRATEGO===^^^^^=======
+
+
